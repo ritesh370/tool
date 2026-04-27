@@ -1,0 +1,35 @@
+# --- AdBot Full Setup & Automation Commands ---
+
+# 1. Update System & Install Dependencies
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-pip python3-venv git curl wget libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libx11-6 libxext6 libxfixes3 libxi6 libxcursor1 libxss1 libxtst6
+
+# 2. Navigate to Project Directory
+cd ~/Desktop/AdBot
+
+# 3. Create and Activate Virtual Environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 4. Install Python Requirements
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 5. Install Playwright Browsers
+playwright install firefox
+playwright install chromium
+
+# 6. Fetch Camoufox Browsers & Addons
+python3 -m camoufox fetch
+
+# 7. Run Automation (Main Entry Point)
+# Option A: Directlink (High Throughput)
+python3 directlink.py
+
+# Option B: AdBot (Advanced Ratio Logic)
+# python3 adbot.py
+
+# --- Troubleshooting ---
+# If you get "Proxy file not found", ensure proxies.txt exists on Desktop:
+# touch ~/Desktop/proxies.txt
+# (Then add your proxies in host:port:user:pass format)
