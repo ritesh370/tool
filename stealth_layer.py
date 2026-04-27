@@ -923,7 +923,8 @@ def build_stealth_js(fp: dict) -> str:
   // Real phones fire deviceorientation every ~100ms with slight drift.
   // Absence is a bot signal on mobile UAs.
   // ─────────────────────────────────────────────────────────────────
-  {f"""
+  {'"""' if not is_mobile else ''}
+  {'' if not is_mobile else f"""
   try {{
     let _alpha = {init_alpha}, _beta = {init_beta}, _gamma = {init_gamma};
     setInterval(() => {{
@@ -931,13 +932,14 @@ def build_stealth_js(fp: dict) -> str:
       _beta  = Math.max(-180, Math.min(180, _beta  + (Math.random()-0.5)*0.15));
       _gamma = Math.max(-90,  Math.min(90,  _gamma + (Math.random()-0.5)*0.10));
       try {{
-        window.dispatchEvent(new DeviceOrientationEvent("deviceorientation", {{
+        window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', {{
           alpha: _alpha, beta: _beta, gamma: _gamma, absolute: false
         }}));
       }} catch(e) {{}}
     }}, 100 + Math.floor(Math.random() * 30));
   }} catch(e) {{}}
-  """ if is_mobile else ""}
+  """}
+  {'"""' if not is_mobile else ''}
 
 }})();
 """
