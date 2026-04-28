@@ -51,9 +51,15 @@ logger.add("automation.log", rotation="10 MB", retention="7 days", level="DEBUG"
 # ════════════════════════════════════════════════════════════════════════════
 #  CONFIG  ← tune these to taste
 # ════════════════════════════════════════════════════════════════════════════
-TARGET_URLS = [
-    "https://www.profitablecpmratenetwork.com/dkxcd57m?key=f5c846183208f82086e57312b3b9d27e",
-]
+# ── Target URL registry ──────────────────────────────────────────────────────
+TARGET_URLS = {
+    "A": "https://www.profitablecpmratenetwork.com/cjxya6ryf?key=70918fad640b558653ab552163ba91be",
+    "B": "https://www.profitablecpmratenetwork.com/dkxcd57m?key=f5c846183208f82086e57312b3b9d27e",
+}
+
+# Active URL — overridden by the startup URL-selection menu
+ACTIVE_URL: str = TARGET_URLS["A"]
+_active_url_label: str = "A"   # set by _select_url() before main() is called
 
 # ── Throughput levers ────────────────────────────────────────────────────────
 NUM_PROFILES        = 12         # concurrent browser slots per batch (12 is safe in headless)
@@ -1061,7 +1067,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
                         # no need to actually visit the referrer site first (saves proxy bandwidth).
                         resp = await asyncio.wait_for(
                             page.goto(
-                                TARGET_URLS[0],
+                                ACTIVE_URL,
                                 wait_until="load",       # ← full page load incl. JS
                                 timeout=NAV_TIMEOUT_MS,
                             ),
@@ -1323,7 +1329,7 @@ async def main() -> None:
     logger.info("═" * 68)
     logger.info(f"  directlink.py — Stealth Layer v13  (MAX THROUGHPUT)")
     logger.info("═" * 68)
-    logger.info(f"  URL            : {TARGET_URLS[0][:65]}")
+    logger.info(f"  URL            : [{_active_url_label}] {ACTIVE_URL[:65]}")
     logger.info(f"  Proxy file     : {PROXY_FILE}  ({len(PROXIES)} loaded)")
     _show_proxy_summary(PROXIES)
     logger.info(f"  Profiles/cycle : {NUM_PROFILES}–{NUM_PROFILES+2} parallel")
@@ -1362,7 +1368,34 @@ async def main() -> None:
 #  ENTRY POINT
 # ════════════════════════════════════════════════════════════════════════════
 
+def _select_url() -> str:
+    """
+    Interactive URL selector shown at startup.
+    Returns the label ('A' or 'B') chosen by the user.
+    """
+    print("\n" + "═" * 68)
+    print("  --- TARGET URL SELECTION ---")
+    print(f"  A. {TARGET_URLS['A']}")
+    print(f"  B. {TARGET_URLS['B']}")
+    while True:
+        try:
+            choice = input("\n  Choose URL (A or B) [A]: ").strip().upper() or "A"
+        except EOFError:
+            choice = "A"
+            break
+        if choice in ("A", "B"):
+            break
+        print("  Invalid choice — enter A or B.")
+    return choice
+
+
 if __name__ == "__main__":
+    # ── Step 1: URL selection ─────────────────────────────────────────────
+    _active_url_label = _select_url()
+    ACTIVE_URL = TARGET_URLS[_active_url_label]
+    print(f"\n  ► Using URL [{_active_url_label}]: {ACTIVE_URL}")
+
+    # ── Step 2: Device fingerprint selection ─────────────────────────────
     print("\n" + "═" * 68)
     print("  --- DEVICE FINGERPRINT (90% of profiles) ---")
     print("  1. android   2. mac   3. linux   4. windows")
