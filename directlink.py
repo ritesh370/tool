@@ -64,9 +64,8 @@ _active_url_label: str = "A"   # set by _select_url() before main() is called
 # ── Throughput levers ────────────────────────────────────────────────────────
 NUM_PROFILES        = 12         # concurrent browser slots per batch (12 is safe in headless)
 DWELL_PER_URL       = (6, 12)    # balanced middle-ground: clears 5s IAB viewability but keeps imp/hr high
-REFERRER_DEPTH      = True       # load actual social/search referrer page before jumping to target
 HEADLESS            = False       # True = invisible (no GPU fight = faster + reliable loads)
-PROFILE_TIMEOUT     = 65         # force-kill a stuck profile after N seconds
+PROFILE_TIMEOUT     = 75         # force-kill a stuck profile after N seconds
 COOLDOWN            = (0, 1)    # seconds between cycles: nearly zero
 MAX_RETRIES         = 3          # attempts per slot, each with a fresh proxy
 PROXY_FILE          = Path.home() / "Desktop" / "proxies.txt"
@@ -74,9 +73,9 @@ TARGET_DEVICE       = "windows"  # overridden by startup menu
 
 # ── Proxy pool settings ──────────────────────────────────────────────────────
 PROXY_QUARANTINE_S  = 45         # dead-proxy cool-down (seconds)
-NAV_TIMEOUT_MS      = 30_000     # page.goto timeout — increased for wait_until=load
-BROWSER_LAUNCH_TO   = 30.0       # asyncio timeout for browser launch (seconds)
-RELAY_START_TO      = 8.0        # asyncio timeout for relay start (seconds)
+NAV_TIMEOUT_MS      = 45_000     # page.goto timeout — 45s for slow proxies / heavy pages
+BROWSER_LAUNCH_TO   = 35.0       # asyncio timeout for browser launch (seconds)
+RELAY_START_TO      = 12.0       # asyncio timeout for relay start (seconds)
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -365,28 +364,26 @@ def _geo_from_proxy(raw: str) -> dict:
 
 # ── HARD proxy faults → quarantine proxy immediately ─────────────────────────
 # These errors are caused BY THE PROXY being dead/misconfigured/banned.
-# DO NOT put destination-side errors here (net_reset, connection_reset, timeout)
-# because those quarantine perfectly good proxies!
+# ONLY put errors that 100% confirm the PROXY (not destination site) is broken.
+# econnrefused / connection refused are NOT here — they frequently come from
+# the DESTINATION SITE being down or blocking, not the proxy.
 _PROXY_FAULT_HARD = frozenset({
     "failed to connect to proxy",
     "407 proxy",
     "proxy authentication",
     "cannot connect to proxy",
     "tunnel connection failed",
-    "econnrefused",
-    "connection refused",
     "proxy connect",
     "proxyerror",
     "no route to host",
     "network unreachable",
     "name or service not known",
-    "name resolution failed",   # only when caused by proxy DNS
+    "name resolution failed",   # only when caused by proxy DNS (checked via context)
     "getaddrinfo failed",
     "socks connection failed",
     "socks5 handshake",
     "socks4 connection",
     "authentication failed",
-    "ns_error_connection_refused",
     "err_proxy_connection_failed",
     "err_tunnel_connection_failed",
     "errno -3",
@@ -400,14 +397,12 @@ _PROXY_FAULT_HARD = frozenset({
     "datacenter ip",
     "bot detected",
     "ip is blocked",
-    "sec_error_unknown_issuer",
-    "ssl_error_rx_record_too_long",
 })
 
 # ── SOFT page errors → release proxy clean (not its fault) ───────────────────
-# NS_ERROR_NET_RESET, connection_reset, timeouts, empty responses are often
-# caused by the DESTINATION site rate-limiting or closing connections —
-# the proxy worked fine. Do NOT quarantine for these.
+# These errors come from the DESTINATION SITE, not the proxy. Do NOT quarantine.
+# NS_ERROR_NET_RESET, NS_ERROR_CONNECTION_REFUSED, SSL errors, timeouts, etc.
+# are all caused by the target site rate-limiting, blocking, or having cert issues.
 _PAGE_FAULT_KEYWORDS = frozenset({
     "ns_error_net_reset",
     "net::err_connection_reset",
@@ -416,18 +411,35 @@ _PAGE_FAULT_KEYWORDS = frozenset({
     "err_connection_timed_out",
     "err_empty_response",
     "timeout",
+    # ── SSL / cert errors = destination site cert issue, NOT proxy fault ───
     "ssl_error",
+    "sec_error",
+    "ssl_error_rx_record_too_long",
+    "sec_error_unknown_issuer",
+    "err_cert",
+    "err_ssl",
+    "your connection is not private",
+    # ── Connection refused can be destination-side too ─────────────────────
+    "ns_error_connection_refused",
+    "econnrefused",
+    "connection refused",
+    "err_connection_refused",
+    # ── Access/auth errors from destination site ───────────────────────────
     "access denied",
     "403",
-    "your connection is not private",
 })
 
 
 def _is_proxy_fault(err: str) -> bool:
     """True only for HARD proxy faults — those where the proxy itself is broken.
-    Destination-side resets/timeouts are NOT proxy faults."""
+    Destination-side resets/timeouts/SSL errors/connection refused are NOT proxy faults.
+    KEY RULE: if ANY soft page-fault keyword matches, it is NOT a proxy fault —
+    even if a hard-fault keyword also appears (e.g. proxy error in error trace)."""
     low = err.lower()
-    # Check hard proxy fault keywords (exact substring match)
+    # If it matches any SOFT/page-fault keyword → definitely not a proxy fault
+    if any(k in low for k in _PAGE_FAULT_KEYWORDS):
+        return False
+    # Only quarantine if a HARD proxy-specific keyword matches
     return any(k in low for k in _PROXY_FAULT_HARD)
 
 
@@ -571,16 +583,27 @@ def _build_ff_prefs(proxy_cfg: dict) -> dict:
         "network.automatic-ntlm-auth.trusted-uris":           "",
         "network.negotiate-auth.trusted-uris":                "",
         "network.negotiate-auth.delegation-uris":             "",
-        # ── SSL / TLS bypass ──────────────────────────────────────────────
-        "security.tls.version.min":                           1,
-        "security.tls.version.max":                           4,
+        # ── SSL / TLS — full bypass of certificate and protocol errors ─────
+        # This prevents SSL_ERROR_RX_RECORD_TOO_LONG, SEC_ERROR_UNKNOWN_ISSUER,
+        # and other TLS errors from killing sessions when target sites have
+        # misconfigured or self-signed certs.
+        "security.tls.version.min":                           1,   # TLS 1.0+ (broadest compat)
+        "security.tls.version.max":                           4,   # TLS 1.3
+        "security.tls.enable_0rtt_data":                      False,
         "security.enterprise_roots.enabled":                  True,
-        "security.cert_pinning.enforcement_level":            0,
-        "security.OCSP.enabled":                              0,
+        "security.cert_pinning.enforcement_level":            0,   # disable cert pinning
+        "security.OCSP.enabled":                              0,   # disable OCSP checks
+        "security.OCSP.require":                              False,
+        "security.ssl.errorReporting.enabled":                False,
+        "security.ssl.enable_false_start":                    True,
+        "security.ssl.require_safe_negotiation":              False,
+        "security.ssl.treat_unsafe_negotiation_as_broken":    False,
         "network.stricttransportsecurity.preloadlist":        False,
         "security.pki.sha1_enforcement_level":                0,
         "security.tls.insecure_fallback_hosts.use_static_list": False,
         "security.insecure_field_warning.contextual.enabled": False,
+        "security.mixed_content.block_active_content":        False,
+        "security.mixed_content.block_display_content":       False,
         # ── WebRTC leak control ───────────────────────────────────────────
         "media.peerconnection.enabled":                       True,
         "media.peerconnection.ice.default_address_only":      True,
@@ -805,9 +828,25 @@ class LocalSocks5Relay:
             await up_writer.drain()
 
             # 6. Read upstream CONNECT response
-            up_conn_resp = await asyncio.wait_for(up_reader.read(4), timeout=10.0)
+            up_conn_resp = await asyncio.wait_for(up_reader.read(4), timeout=15.0)
             if len(up_conn_resp) < 4:
-                raise Exception("Upstream closed early")
+                raise Exception("Upstream closed early — bad CONNECT response")
+            # Validate SOCKS5 response: VER=0x05, REP=0x00 means success
+            if up_conn_resp[0] != 0x05:
+                raise Exception(f"Upstream returned non-SOCKS5 response: {up_conn_resp!r}")
+            if up_conn_resp[1] != 0x00:
+                _rep_codes = {
+                    0x01: "general failure",
+                    0x02: "connection not allowed",
+                    0x03: "network unreachable",
+                    0x04: "host unreachable",
+                    0x05: "connection refused",
+                    0x06: "TTL expired",
+                    0x07: "command not supported",
+                    0x08: "address type not supported",
+                }
+                rep_msg = _rep_codes.get(up_conn_resp[1], f"code=0x{up_conn_resp[1]:02x}")
+                raise Exception(f"SOCKS5 upstream CONNECT failed: {rep_msg}")
             up_atyp = up_conn_resp[3]
             if up_atyp == 1:
                 up_bnd_addr = await up_reader.read(4)
@@ -1032,7 +1071,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
                 ) as browser:
 
                     ctx = await browser.new_context(
-                        ignore_https_errors=True,
+                        ignore_https_errors=True,   # bypass SSL cert errors on target pages
                         java_script_enabled=True,
                         accept_downloads=False,
                         user_agent=fp["user_agent"],
@@ -1043,6 +1082,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
                         has_touch=fp["has_touch"],
                         extra_http_headers=extra_headers,
                         proxy=pw_proxy,
+                        service_workers="allow",
                     )
                     await ctx.add_init_script(build_stealth_js(fp))
                     await ctx.add_init_script(BEHAVIORAL_JS)
@@ -1062,19 +1102,22 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
                     wd = asyncio.create_task(_watchdog())
 
                     try:
-                        # ── Navigate: wait_until="load" ensures ALL page JS
-                        # Referer is already sent via extra_http_headers on the context —
-                        # no need to actually visit the referrer site first (saves proxy bandwidth).
+                        # ── Navigate: wait_until="domcontentloaded" is faster than
+                        # "load" and sufficient for ad impression registration.
+                        # ignore_https_errors is already set on ctx but we also set it
+                        # here explicitly for belt-and-suspenders SSL error bypass.
                         resp = await asyncio.wait_for(
                             page.goto(
                                 ACTIVE_URL,
-                                wait_until="load",       # ← full page load incl. JS
+                                wait_until="domcontentloaded",  # faster than load, still fires JS
                                 timeout=NAV_TIMEOUT_MS,
                             ),
-                            timeout=NAV_TIMEOUT_MS / 1000 + 5.0,
+                            timeout=NAV_TIMEOUT_MS / 1000 + 8.0,
                         )
 
                         if not resp: raise Exception("err_empty_response")
+                        # 429/502/503/504 = destination rate-limit, not proxy fault
+                        # 403 alone is also target-side; do not quarantine proxy
                         if resp.status in (403, 429, 502, 503, 504):
                             raise Exception(f"access denied (HTTP {resp.status}) — rate limit / block")
 
