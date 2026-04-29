@@ -151,6 +151,8 @@ def get_custom_fingerprint(target_os: str, mix_ratio: float = 0.1, seed: int = N
     
     if target_os == 'android':
         target_platforms = ['Linux aarch64']
+    elif target_os == 'ios':
+        target_platforms = ['iPhone', 'iPad']
     elif target_os == 'mac':
         target_platforms = ['MacIntel']
     elif target_os == 'linux':
@@ -242,7 +244,8 @@ def build_stealth_js(fp: dict) -> str:
     tz_base    = _TZ_OFFSETS.get(tz, 300)
     tz_no_dst  = str(tz in _TZ_NO_DST).lower()
     prefers_dark = str(random.random() < 0.4).lower()
-    nav_vendor  = "Apple Computer, Inc." if ("Safari" in fp["user_agent"] and "Chrome" not in fp["user_agent"]) else "Google Inc."
+    is_safari  = "Safari" in fp["user_agent"] and "Chrome" not in fp["user_agent"]
+    nav_vendor = "Apple Computer, Inc." if is_safari else "Google Inc."
 
     # Synthetic navigation timing (consistent, not drifting)
     nav_start      = f"(Date.now() - {random.randint(400, 1200)})"
@@ -499,7 +502,7 @@ def build_stealth_js(fp: dict) -> str:
   }}
   _defNav('platform',           '{fp["platform"]}');
   _defNav('hardwareConcurrency', {fp["hw_concurrency"]});
-  _defNav('deviceMemory',        {fp["device_memory"]});
+  {f"try {{ delete navigator.deviceMemory; Object.defineProperty(navigator, 'deviceMemory', {{get: () => undefined, configurable: true}}); }} catch(e) {{}}" if is_safari else f"_defNav('deviceMemory', {fp['device_memory']});"}
   _defNav('maxTouchPoints',      {touch_pts});
   _defNav('language',            '{fp["locale"]}');
   _defNav('languages',           ['{fp["locale"]}', 'en']);
@@ -525,6 +528,7 @@ def build_stealth_js(fp: dict) -> str:
 
   // ── 5. USER AGENT DATA ──────────────────────────────────────────
   try {{
+    {f"Object.defineProperty(navigator, 'userAgentData', {{get: () => undefined, configurable: true}});" if is_safari else f"""
     if (navigator.userAgentData) {{
       const _uad = {{
         brands: [
@@ -548,6 +552,7 @@ def build_stealth_js(fp: dict) -> str:
       }};
       Object.defineProperty(navigator,'userAgentData',{{get:_makeNative(()=>_uad,'get userAgentData'),configurable:true}});
     }}
+    """}
   }} catch(e) {{}}
 
   // ── 6. WEBGL ────────────────────────────────────────────────────
@@ -653,9 +658,11 @@ def build_stealth_js(fp: dict) -> str:
     Object.defineProperty(screen,'availHeight',{{get:_makeNative(()=>_sh-48,'get availHeight'),configurable:true}});
     Object.defineProperty(screen,'colorDepth', {{get:_makeNative(()=>24,'get colorDepth'),configurable:true}});
     Object.defineProperty(screen,'pixelDepth', {{get:_makeNative(()=>24,'get pixelDepth'),configurable:true}});
+    {f"try {{ delete screen.orientation; Object.defineProperty(screen, 'orientation', {{get: () => undefined, configurable: true}}); }} catch(e) {{}}" if is_safari else f"""
     if (screen.orientation) {{
       Object.defineProperty(screen.orientation,'type',{{get:_makeNative(()=>'{fp["screen_orientation"]}','get type'),configurable:true}});
     }}
+    """}
     // [FIX v5] Sync window.outerWidth/Height with viewport to avoid fingerprint mismatch
     Object.defineProperty(window, 'outerWidth',  {{get: _makeNative(()=>_sw, 'get outerWidth'), configurable: true}});
     Object.defineProperty(window, 'outerHeight', {{get: _makeNative(()=>_sh, 'get outerHeight'), configurable: true}});
@@ -666,8 +673,10 @@ def build_stealth_js(fp: dict) -> str:
 
   // ── 11. BATTERY API ─────────────────────────────────────────────
   try {{
+    {f"try {{ delete navigator.getBattery; Object.defineProperty(navigator, 'getBattery', {{get: () => undefined, configurable: true}}); }} catch(e) {{}}" if is_safari else f"""
     const _bat={{charging:{charging},chargingTime:{fp["charging_time"]},dischargingTime:{fp["discharging_time"]},level:{fp["battery_level"]:.2f},addEventListener:()=>{{}},removeEventListener:()=>{{}}}};
     Object.defineProperty(navigator,'getBattery',{{get:_makeNative(()=>_makeNative(()=>Promise.resolve(_bat),'getBattery'),'get getBattery'),configurable:true}});
+    """}
   }} catch(e) {{}}
 
   // ── 12. GEOLOCATION ─────────────────────────────────────────────
@@ -679,10 +688,12 @@ def build_stealth_js(fp: dict) -> str:
 
   // ── 13. NETWORK INFO ────────────────────────────────────────────
   try {{
+    {f"['connection','mozConnection','webkitConnection'].forEach(k=>{{ try{{ delete navigator[k]; Object.defineProperty(navigator, k, {{get: () => undefined, configurable: true}}); }}catch(e){{}} }});" if is_safari else f"""
     const _c={{downlink:{network_downlink},effectiveType:'{network_eff_type}',rtt:{network_rtt},saveData:false,type:'{network_type}',addEventListener:()=>{{}},removeEventListener:()=>{{}}}};
     ['connection','mozConnection','webkitConnection'].forEach(k=>{{
       try{{Object.defineProperty(navigator,k,{{get:_makeNative(()=>_c,`get ${{k}}`),configurable:true}})}}catch(e){{}}
     }});
+    """}
   }} catch(e) {{}}
 
   // ── 14. PERMISSIONS ─────────────────────────────────────────────
@@ -697,6 +708,7 @@ def build_stealth_js(fp: dict) -> str:
 
   // ── 15. CHROME OBJECT ───────────────────────────────────────────
   try {{
+    {f"try {{ delete window.chrome; Object.defineProperty(window, 'chrome', {{get: () => undefined, configurable: true}}); }} catch(e) {{}}" if is_safari else f"""
     if (!window.chrome) {{
       window.chrome={{
         runtime:{{
@@ -713,6 +725,7 @@ def build_stealth_js(fp: dict) -> str:
         app:{{isInstalled:false}},
       }};
     }}
+    """}
   }} catch(e) {{}}
 
   // ── 16. SPEECH SYNTHESIS ────────────────────────────────────────
@@ -881,7 +894,7 @@ def build_stealth_js(fp: dict) -> str:
         'Calibri','Tahoma','Palatino','Century Gothic','Helvetica',
         'Lucida Console','Lucida Sans Unicode','Microsoft Sans Serif']);
       document.fonts.check=_makeNative(function(font,text){{
-        const name=font.replace(/^[\d.]+px\s+/,'').replace(/['"]/g,'').split(',')[0].trim();
+        const name=font.replace(/^[\\\\d.]+px\\\\s+/,'').replace(/['"]/g,'').split(',')[0].trim();
         if(_commonFonts.has(name)) return true;
         return _fc(font,text);
       }},'check');
