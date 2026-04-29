@@ -137,23 +137,26 @@ def _pick_traffic_source(fp: dict) -> tuple:
         hdrs["Referer"] = ref
 
     # Sec-CH-UA — spoof based on platform
-    if "Android" in ua:
-        ch_ua = '"Chromium";v="124", "Android WebView";v="124", "Not-A.Brand";v="99"'
-        hdrs["Sec-CH-UA-Mobile"]   = "?1"
-        hdrs["Sec-CH-UA-Platform"] = '"Android"'
-    elif "Win" in ua:
-        ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-        hdrs["Sec-CH-UA-Mobile"]   = "?0"
-        hdrs["Sec-CH-UA-Platform"] = '"Windows"'
-    elif "Mac" in ua:
-        ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-        hdrs["Sec-CH-UA-Mobile"]   = "?0"
-        hdrs["Sec-CH-UA-Platform"] = '"macOS"'
-    else:
-        ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-        hdrs["Sec-CH-UA-Mobile"]   = "?0"
-        hdrs["Sec-CH-UA-Platform"] = '"Linux"'
-    hdrs["Sec-CH-UA"] = ch_ua
+    # Safari (iOS/macOS browser) does not send Sec-CH-UA headers
+    is_safari = "Safari" in ua and "Chrome" not in ua
+    if not is_safari:
+        if "Android" in ua:
+            ch_ua = '"Chromium";v="124", "Android WebView";v="124", "Not-A.Brand";v="99"'
+            hdrs["Sec-CH-UA-Mobile"]   = "?1"
+            hdrs["Sec-CH-UA-Platform"] = '"Android"'
+        elif "Win" in ua:
+            ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+            hdrs["Sec-CH-UA-Mobile"]   = "?0"
+            hdrs["Sec-CH-UA-Platform"] = '"Windows"'
+        elif "Mac" in ua:
+            ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+            hdrs["Sec-CH-UA-Mobile"]   = "?0"
+            hdrs["Sec-CH-UA-Platform"] = '"macOS"'
+        else:
+            ch_ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+            hdrs["Sec-CH-UA-Mobile"]   = "?0"
+            hdrs["Sec-CH-UA-Platform"] = '"Linux"'
+        hdrs["Sec-CH-UA"] = ch_ua
 
     hdrs.update(src.get("extra", {}))
     return hdrs, src["name"]
@@ -1053,7 +1056,8 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
                 extra_headers, src_name = _pick_traffic_source(fp)
                 os_hint = (
                     "windows" if "Win32" in fp["platform"] else
-                    "macos"   if "Mac"   in fp["platform"] else
+                    "macos"   if "Mac" in fp["platform"] or "iPhone" in fp["platform"] or "iPad" in fp["platform"] else
+                    "android" if "Android" in fp.get("user_agent", "") else
                     "linux"
                 )
 
@@ -1446,17 +1450,18 @@ if __name__ == "__main__":
     # ── Step 2: Device fingerprint selection ─────────────────────────────
     print("\n" + "═" * 68)
     print("  --- DEVICE FINGERPRINT (90% of profiles) ---")
-    print("  1. android   2. mac   3. linux   4. windows")
+    print("  1. android   2. ios   3. mac   4. linux   5. windows")
     while True:
         try:
-            c = input("\n  Choice (1-4 or name) [windows]: ").strip().lower() or "windows"
+            c = input("\n  Choice (1-5 or name) [windows]: ").strip().lower() or "windows"
         except EOFError:
             c = "windows"
             break
         if c in ("1", "android"): TARGET_DEVICE = "android"; break
-        if c in ("2", "mac"):     TARGET_DEVICE = "mac";     break
-        if c in ("3", "linux"):   TARGET_DEVICE = "linux";   break
-        if c in ("4", "windows"): TARGET_DEVICE = "windows"; break
+        if c in ("2", "ios"):     TARGET_DEVICE = "ios";     break
+        if c in ("3", "mac"):     TARGET_DEVICE = "mac";     break
+        if c in ("4", "linux"):   TARGET_DEVICE = "linux";   break
+        if c in ("5", "windows"): TARGET_DEVICE = "windows"; break
         print("  Try again.")
 
     print(f"\n  ► Running with {TARGET_DEVICE.upper()} fingerprint\n")
