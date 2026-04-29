@@ -19,6 +19,7 @@ NEW in v13 vs v12:
 """
 
 import asyncio
+import os
 import random
 import re
 import signal
@@ -27,6 +28,10 @@ import time
 from collections import deque
 from contextlib import suppress
 from pathlib import Path
+
+# ── Prevent malloc memory corruption crash from concurrent browser launches ──
+os.environ.setdefault("MALLOC_CHECK_", "0")
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 
 from camoufox.async_api import AsyncCamoufox
 from camoufox.addons import DefaultAddons
@@ -62,12 +67,12 @@ ACTIVE_URL: str = TARGET_URLS["A"]
 _active_url_label: str = "A"   # set by _select_url() before main() is called
 
 # ── Throughput levers ────────────────────────────────────────────────────────
-NUM_PROFILES        = 12         # concurrent browser slots per batch (12 is safe in headless)
+NUM_PROFILES        = 7        # concurrent browser slots — keep low to avoid malloc crashes
 DWELL_PER_URL       = (6, 12)    # balanced middle-ground: clears 5s IAB viewability but keeps imp/hr high
 HEADLESS            = False       # True = invisible (no GPU fight = faster + reliable loads)
 PROFILE_TIMEOUT     = 75         # force-kill a stuck profile after N seconds
 COOLDOWN            = (0, 1)    # seconds between cycles: nearly zero
-MAX_RETRIES         = 3          # attempts per slot, each with a fresh proxy
+MAX_RETRIES         = 1          # 1 attempt per slot: on page errors stop immediately, grab new proxy
 PROXY_FILE          = Path.home() / "Desktop" / "proxies.txt"
 TARGET_DEVICE       = "windows"  # overridden by startup menu
 
@@ -944,7 +949,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
       • Headless = True, no GPU render = 3-4× faster
       • Full anonymity: stealth JS + traffic source spoofing + geo-matched FP
     """
-    await asyncio.sleep(index * 0.03)   # tight stagger  (0.03 s apart)
+    await asyncio.sleep(index * 0.5)   # 0.5 s stagger prevents simultaneous launches (malloc crash fix)
     tag = f"P{index+1:02d}"
 
     # ── Cleanup helper ────────────────────────────────────────────────────────
