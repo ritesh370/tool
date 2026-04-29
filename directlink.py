@@ -58,7 +58,7 @@ logger.add("automation.log", rotation="10 MB", retention="7 days", level="DEBUG"
 # ════════════════════════════════════════════════════════════════════════════
 # ── Target URL registry ──────────────────────────────────────────────────────
 TARGET_URLS = {
-    "A": "https://www.profitablecpmratenetwork.com/cjxya6ryf?key=70918fad640b558653ab552163ba91be",
+    "A": "https://www.profitablecpmratenetwork.com/we4v99rh?key=712b12e15fc48f1f46eadf1ca6baca7e",
     "B": "https://www.profitablecpmratenetwork.com/dkxcd57m?key=f5c846183208f82086e57312b3b9d27e",
 }
 
