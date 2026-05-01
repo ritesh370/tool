@@ -1054,12 +1054,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
 
                 # ── Launch browser with hard timeout ──────────────────────────
                 extra_headers, src_name = _pick_traffic_source(fp)
-                os_hint = (
-                    "windows" if "Win32" in fp["platform"] else
-                    "macos"   if "Mac" in fp["platform"] or "iPhone" in fp["platform"] or "iPad" in fp["platform"] else
-                    "android" if "Android" in fp.get("user_agent", "") else
-                    "linux"
-                )
+
 
                 # Natively bypass DataDome/PerimeterX WebGL/SwiftShader scrutiny
                 ff_prefs["webgl.override-unmasked-vendor"]   = fp.get("webgl_vendor", "Google Inc. (NVIDIA)")
@@ -1068,9 +1063,7 @@ async def run_profile(index: int, sem: asyncio.Semaphore) -> None:
 
                 async with AsyncCamoufox(
                     headless=HEADLESS,
-                    os=os_hint,
-                    locale=fp["locale"],
-                    humanize=True,
+                    humanize=True,  # Let it generate generic humanized headers; we override them in new_context anyway
                     block_webrtc=False,
                     geoip=False,
                     proxy=pw_proxy,
